@@ -342,9 +342,9 @@ function App() {
           <p style={{textAlign: 'center', color: '#6b7280', fontSize: 14, margin: '0 0 20px'}}>מנהלים מטלות בית ביחד</p>
 
           <div style={{display: 'flex', gap: 16, marginBottom: 18, borderBottom: '1.5px solid rgba(0,0,0,0.1)'}}>
-            <div className="tab" style={{color: authTab === 'login' ? '#7c3aed' : 'rgba(255,255,255,0.55)', borderBottomColor: authTab === 'login' ? '#7c3aed' : 'transparent'}}
+            <div className="tab" style={{color: authTab === 'login' ? '#7c3aed' : '#9ca3af', borderBottomColor: authTab === 'login' ? '#7c3aed' : 'transparent'}}
               onClick={() => { setAuthTab('login'); setAuthError(''); }}>התחברות</div>
-            <div className="tab" style={{color: authTab === 'signup' ? '#7c3aed' : 'rgba(255,255,255,0.55)', borderBottomColor: authTab === 'signup' ? '#7c3aed' : 'transparent'}}
+            <div className="tab" style={{color: authTab === 'signup' ? '#7c3aed' : '#9ca3af', borderBottomColor: authTab === 'signup' ? '#7c3aed' : 'transparent'}}
               onClick={() => { setAuthTab('signup'); setAuthError(''); }}>משתמש חדש</div>
           </div>
 
