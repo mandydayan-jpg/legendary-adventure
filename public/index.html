@@ -99,6 +99,7 @@ function App() {
   const [authError, setAuthError] = useState('');
 
   const [currentUser, setCurrentUser] = useState(null);
+  const [authToken, setAuthToken] = useState(null);
   const [group, setGroup] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -157,14 +158,21 @@ function App() {
     try {
       const saved = localStorage.getItem('homeTasksSession');
       if (saved) {
-        const { username: u } = JSON.parse(saved);
-        const data = await api('/api/whoami/' + encodeURIComponent(u));
-        setCurrentUser(data.user);
-        setGroup(data.group);
-        setScreen('app');
-      maybeAskNotifPermission();
+        const { username: u, token: t } = JSON.parse(saved);
+        if (u && t) {
+          const data = await api('/api/whoami/' + encodeURIComponent(u) + '?token=' + encodeURIComponent(t));
+          setCurrentUser(data.user);
+          setAuthToken(data.token);
+          setGroup(data.group);
+          setScreen('app');
+          maybeAskNotifPermission();
+        } else {
+          localStorage.removeItem('homeTasksSession');
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      localStorage.removeItem('homeTasksSession');
+    }
     setBooting(false);
   }
 
@@ -173,8 +181,9 @@ function App() {
     if (!username.trim() || !password) { setAuthError('נא למלא שם משתמש וסיסמה'); return; }
     try {
       const data = await api('/api/login', 'POST', { username: username.trim(), password });
-      localStorage.setItem('homeTasksSession', JSON.stringify({ username: data.user.username }));
+      localStorage.setItem('homeTasksSession', JSON.stringify({ username: data.user.username, token: data.token }));
       setCurrentUser(data.user);
+      setAuthToken(data.token);
       setGroup(data.group);
       setScreen('app');
       maybeAskNotifPermission();
@@ -196,8 +205,9 @@ function App() {
         groupName: groupNameInput,
         groupCode: groupCodeInput,
       });
-      localStorage.setItem('homeTasksSession', JSON.stringify({ username: data.user.username }));
+      localStorage.setItem('homeTasksSession', JSON.stringify({ username: data.user.username, token: data.token }));
       setCurrentUser(data.user);
+      setAuthToken(data.token);
       setGroup(data.group);
       setScreen('app');
       maybeAskNotifPermission();
@@ -209,6 +219,7 @@ function App() {
   function handleLogout() {
     localStorage.removeItem('homeTasksSession');
     setCurrentUser(null);
+    setAuthToken(null);
     setGroup(null);
     setTasks([]);
     setNotifications([]);
@@ -243,7 +254,7 @@ function App() {
     const mine = notifications.some(n => n.toUser === currentUser.username && !n.read);
     if (!mine) return;
     setNotifications(notifications.map(n => (n.toUser === currentUser.username) ? { ...n, read: true } : n));
-    try { await api('/api/notifications/' + group.id + '/read', 'POST', { username: currentUser.username }); } catch (e) {}
+    try { await api('/api/notifications/' + group.id + '/read', 'POST', { username: currentUser.username, token: authToken }); } catch (e) {}
   }
 
   function openNewTaskForm() {
@@ -267,11 +278,11 @@ function App() {
     try {
       if (editingTask) {
         await api('/api/tasks/' + group.id + '/' + editingTask.id, 'PUT', {
-          title: taskTitle.trim(), note: taskNote.trim(), assignee: taskAssignee, byUser: currentUser.username,
+          title: taskTitle.trim(), note: taskNote.trim(), assignee: taskAssignee, username: currentUser.username, token: authToken,
         });
       } else {
         await api('/api/tasks/' + group.id, 'POST', {
-          title: taskTitle.trim(), note: taskNote.trim(), assignee: taskAssignee, byUser: currentUser.username,
+          title: taskTitle.trim(), note: taskNote.trim(), assignee: taskAssignee, username: currentUser.username, token: authToken,
         });
       }
       await refreshState();
@@ -281,14 +292,14 @@ function App() {
 
   async function deleteTask(id) {
     try {
-      await api('/api/tasks/' + group.id + '/' + id, 'DELETE');
+      await api('/api/tasks/' + group.id + '/' + id, 'DELETE', { username: currentUser.username, token: authToken });
       await refreshState();
     } catch (e) {}
   }
 
   async function toggleDone(task) {
     try {
-      await api('/api/tasks/' + group.id + '/' + task.id, 'PUT', { done: !task.done, byUser: currentUser.username });
+      await api('/api/tasks/' + group.id + '/' + task.id, 'PUT', { done: !task.done, username: currentUser.username, token: authToken });
       await refreshState();
     } catch (e) {}
   }
@@ -297,7 +308,7 @@ function App() {
     setSettingsMsg('');
     try {
       await api('/api/user/change-password', 'POST', {
-        username: currentUser.username, oldPassword, newPassword,
+        username: currentUser.username, token: authToken, oldPassword, newPassword,
       });
       setOldPassword(''); setNewPassword('');
       setSettingsMsg('הסיסמה עודכנה בהצלחה.');
@@ -309,7 +320,7 @@ function App() {
   async function handlePromote() {
     if (!promoteTarget) return;
     try {
-      await api('/api/group/' + group.id + '/promote', 'POST', { username: promoteTarget, byUser: currentUser.username });
+      await api('/api/group/' + group.id + '/promote', 'POST', { username: currentUser.username, token: authToken, targetUsername: promoteTarget });
       setPromoteTarget('');
       await refreshState();
       setSettingsMsg(promoteTarget + ' מונה/תה למנהל/ת.');
@@ -321,7 +332,7 @@ function App() {
   async function handleRemoveMember(member) {
     if (!window.confirm('להסיר את ' + member + ' מהקבוצה?')) return;
     try {
-      await api('/api/group/' + group.id + '/remove-member', 'POST', { username: member, byUser: currentUser.username });
+      await api('/api/group/' + group.id + '/remove-member', 'POST', { username: currentUser.username, token: authToken, targetUsername: member });
       await refreshState();
     } catch (e) {
       setSettingsMsg(e.message);
@@ -331,7 +342,7 @@ function App() {
   async function handleLeaveGroup() {
     if (!window.confirm('לעזוב את הקבוצה? תצטרכו קוד הצטרפות כדי לחזור.')) return;
     try {
-      await api('/api/group/' + group.id + '/leave', 'POST', { username: currentUser.username });
+      await api('/api/group/' + group.id + '/leave', 'POST', { username: currentUser.username, token: authToken });
       handleLogout();
     } catch (e) {
       setSettingsMsg(e.message);
@@ -342,7 +353,7 @@ function App() {
     if (!window.confirm('פעולה זו תמחק לצמיתות את הקבוצה, כל המטלות וכל המשתמשים בה. להמשיך?')) return;
     if (!window.confirm('בטוחים לגמרי? אין דרך לבטל את זה.')) return;
     try {
-      await api('/api/group/' + group.id, 'DELETE', { byUser: currentUser.username });
+      await api('/api/group/' + group.id, 'DELETE', { username: currentUser.username, token: authToken });
       handleLogout();
     } catch (e) {
       setSettingsMsg(e.message);
