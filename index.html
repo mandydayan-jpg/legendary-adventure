@@ -116,6 +116,7 @@ function App() {
   );
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showNotifPrompt, setShowNotifPrompt] = useState(false);
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [settingsMsg, setSettingsMsg] = useState('');
@@ -161,6 +162,7 @@ function App() {
         setCurrentUser(data.user);
         setGroup(data.group);
         setScreen('app');
+      maybeAskNotifPermission();
       }
     } catch (e) {}
     setBooting(false);
@@ -175,6 +177,7 @@ function App() {
       setCurrentUser(data.user);
       setGroup(data.group);
       setScreen('app');
+      maybeAskNotifPermission();
     } catch (e) {
       setAuthError(e.message);
     }
@@ -197,6 +200,7 @@ function App() {
       setCurrentUser(data.user);
       setGroup(data.group);
       setScreen('app');
+      maybeAskNotifPermission();
     } catch (e) {
       setAuthError(e.message);
     }
@@ -218,6 +222,21 @@ function App() {
   function requestNotifPermission() {
     if (typeof Notification === 'undefined') return;
     Notification.requestPermission().then(p => setNotifPermission(p));
+  }
+
+  function maybeAskNotifPermission() {
+    try {
+      if (typeof Notification === 'undefined') return;
+      if (Notification.permission !== 'default') return;
+      if (localStorage.getItem('notifPromptAsked')) return;
+      setShowNotifPrompt(true);
+    } catch (e) {}
+  }
+
+  function dismissNotifPrompt(accepted) {
+    localStorage.setItem('notifPromptAsked', '1');
+    setShowNotifPrompt(false);
+    if (accepted) requestNotifPermission();
   }
 
   async function markNotificationsRead() {
@@ -546,6 +565,22 @@ function App() {
               {isAdmin && (
                 <button className="btn" style={{background: '#dc2626', color: '#ffffff'}} onClick={handleDeleteGroup}>מחיקת הקבוצה לצמיתות</button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNotifPrompt && (
+        <div style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 30}}>
+          <div className="note" style={{width: 360, maxWidth: '100%', padding: '26px 24px', textAlign: 'center'}}>
+            <div style={{fontSize: 36, marginBottom: 8}}>🔔</div>
+            <h2 style={{marginTop: 0, fontSize: 18}}>לקבל התראות?</h2>
+            <p style={{color: '#6b7280', fontSize: 14, margin: '0 0 20px'}}>
+              נוכל לשלוח לכם התראה בדפדפן ברגע שמישהו מקצה לכם מטלה חדשה.
+            </p>
+            <div style={{display: 'flex', gap: 10}}>
+              <button className="btn btn-primary" style={{flex: 1}} onClick={() => dismissNotifPrompt(true)}>כן, הפעילו התראות</button>
+              <button className="btn btn-ghost" style={{flex: 1}} onClick={() => dismissNotifPrompt(false)}>לא תודה</button>
             </div>
           </div>
         </div>
