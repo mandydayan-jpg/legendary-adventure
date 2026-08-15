@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>לוח המטלות של המשפחה</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#7c3aed">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="מטלות בית">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<link rel="icon" href="./icon-192.png">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap');
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: 'Heebo', sans-serif;
+  background: linear-gradient(135deg, #4338ca 0%, #6d28d9 50%, #9333ea 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+  color: #1f2937;
+}
+h1, h2, h3, .display { font-family: 'Heebo', sans-serif; font-weight: 700; }
+.pin { display: none; }
+.note {
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 8px 24px rgba(30, 20, 60, 0.18), 0 2px 6px rgba(30, 20, 60, 0.08);
+  position: relative;
+  border: 1px solid rgba(255,255,255,0.5);
+}
+.btn { font-family: 'Heebo', sans-serif; font-weight: 600; border: none; border-radius: 12px; padding: 10px 18px; cursor: pointer; font-size: 15px; transition: transform 0.08s ease, opacity 0.15s ease, box-shadow 0.15s ease; }
+.btn:active { transform: scale(0.97); }
+.btn-primary { background: linear-gradient(135deg, #4f46e5, #9333ea); color: #fff; box-shadow: 0 4px 14px rgba(99, 60, 220, 0.35); }
+.btn-primary:hover { box-shadow: 0 6px 18px rgba(99, 60, 220, 0.45); }
+.btn-ghost { background: transparent; color: #4c1d95; border: 1.5px solid rgba(76,29,149,0.25); }
+.btn-ghost:hover { background: rgba(76,29,149,0.06); }
+.btn-danger { background: transparent; color: #dc2626; }
+.input { font-family: 'Heebo', sans-serif; font-size: 15px; padding: 11px 14px; border-radius: 10px; border: 1.5px solid #e5e0f5; width: 100%; background: #faf9ff; }
+.input:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.12); }
+.tab { font-family: 'Heebo', sans-serif; font-weight: 600; padding: 8px 4px; cursor: pointer; color: rgba(255,255,255,0.55); border-bottom: 3px solid transparent; }
+.tab.active { color: #fff; border-bottom-color: #fff; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+.bell-wrap { position: relative; }
+.bell-btn { background: rgba(255,255,255,0.15); border: 1.5px solid rgba(255,255,255,0.3); border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; font-size: 17px; transition: background 0.15s ease; }
+.bell-btn:hover { background: rgba(255,255,255,0.25); }
+.bell-badge { position: absolute; top: -3px; left: -3px; background: #ef4444; color: #fff; border-radius: 20px; font-size: 11px; font-weight: 700; min-width: 17px; height: 17px; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
+.bell-dropdown { position: absolute; top: 48px; left: 0; width: 300px; max-height: 340px; overflow-y: auto; background: #ffffff; border-radius: 14px; box-shadow: 0 12px 32px rgba(30,20,60,0.25); z-index: 20; padding: 6px; }
+.notif-item { padding: 10px 10px; border-radius: 10px; font-size: 13px; margin-bottom: 2px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const MEMBER_COLORS = [
+  { bg: '#f6d186', text: '#5c3e05', border: '#e0af3e' },
+  { bg: '#a7c7e7', text: '#0b3a63', border: '#6ea0d6' },
+  { bg: '#f3a6b2', text: '#6b0f22', border: '#e0708a' },
+  { bg: '#a8d8b9', text: '#134426', border: '#6cb98a' },
+  { bg: '#c9b6e4', text: '#3d1d63', border: '#a687d0' },
+];
+
+function colorFor(username) {
+  let h = 0;
+  for (let i = 0; i < username.length; i++) h = (h * 31 + username.charCodeAt(i)) >>> 0;
+  return MEMBER_COLORS[h % MEMBER_COLORS.length];
+}
+
+async function api(path, method, body) {
+  const res = await fetch(path, {
+    method: method || 'GET',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'שגיאה');
+  return data;
+}
+
+function App() {
+  const [booting, setBooting] = useState(true);
+  const [screen, setScreen] = useState('login');
+  const [authTab, setAuthTab] = useState('login');
+  const [signupMode, setSignupMode] = useState('newGroup');
+
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [groupNameInput, setGroupNameInput] = useState('');
+  const [groupCodeInput, setGroupCodeInput] = useState('');
+  const [authError, setAuthError] = useState('');
+
+  const [currentUser, setCurrentUser] = useState(null);
+  const [group, setGroup] = useState(null);
+  const [tasks, setTasks] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const knownNotifIds = useRef(new Set());
+
+  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskNote, setTaskNote] = useState('');
+  const [taskAssignee, setTaskAssignee] = useState('');
+
+  const [showBell, setShowBell] = useState(false);
+  const [notifPermission, setNotifPermission] = useState(
+    (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported'
+  );
+
+  const [showSettings, setShowSettings] = useState(false);
+  const [showNotifPrompt, setShowNotifPrompt] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [settingsMsg, setSettingsMsg] = useState('');
+  const [promoteTarget, setPromoteTarget] = useState('');
+
+  useEffect(() => { tryAutoLogin(); }, []);
+
+  useEffect(() => {
+    if (!currentUser || !group) return;
+    refreshState();
+    const interval = setInterval(refreshState, 5000);
+    return () => clearInterval(interval);
+  }, [currentUser, group && group.id]);
+
+  async function refreshState() {
+    try {
+      const data = await api('/api/state/' + group.id);
+      setGroup(data.group);
+      setTasks(data.tasks);
+
+      const fresh = data.notifications.filter(
+        n => n.toUser === currentUser.username && !knownNotifIds.current.has(n.id)
+      );
+      data.notifications.forEach(n => knownNotifIds.current.add(n.id));
+      if (fresh.length > 0 && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        fresh.forEach(n => {
+          const body = n.type === 'assigned'
+            ? (n.fromUser + ' הקצה/תה לך מטלה: ' + n.taskTitle)
+            : (n.fromUser + ' סימן/ה שהמטלה "' + n.taskTitle + '" בוצעה');
+          new Notification('לוח המטלות של המשפחה', { body });
+        });
+      }
+      setNotifications(data.notifications);
+    } catch (e) {}
+  }
+
+  async function tryAutoLogin() {
+    try {
+      const saved = localStorage.getItem('homeTasksSession');
+      if (saved) {
+        const { username: u } = JSON.parse(saved);
+        const data = await api('/api/whoami/' + encodeURIComponent(u));
+        setCurrentUser(data.user);
+        setGroup(data.group);
+        setScreen('app');
+      maybeAskNotifPermission();
+      }
+    } catch (e) {}
+    setBooting(false);
+  }
+
+  async function handleLogin() {
+    setAuthError('');
+    if (!username.trim() || !password) { setAuthError('נא למלא שם משתמש וסיסמה'); return; }
+    try {
+      const data = await api('/api/login', 'POST', { username: username.trim(), password });
+      localStorage.setItem('homeTasksSession', JSON.stringify({ username: data.user.username }));
+      setCurrentUser(data.user);
+      setGroup(data.group);
+      setScreen('app');
+      maybeAskNotifPermission();
+    } catch (e) {
+      setAuthError(e.message);
+    }
+  }
+
+  async function handleSignup() {
+    setAuthError('');
+    if (!username.trim() || !password) { setAuthError('נא למלא שם משתמש וסיסמה'); return; }
+    if (signupMode === 'newGroup' && !groupNameInput.trim()) { setAuthError('נא להזין שם לקבוצה'); return; }
+    if (signupMode === 'joinGroup' && !groupCodeInput.trim()) { setAuthError('נא להזין קוד קבוצה'); return; }
+    try {
+      const data = await api('/api/signup', 'POST', {
+        username: username.trim(),
+        password,
+        mode: signupMode,
+        groupName: groupNameInput,
+        groupCode: groupCodeInput,
+      });
+      localStorage.setItem('homeTasksSession', JSON.stringify({ username: data.user.username }));
+      setCurrentUser(data.user);
+      setGroup(data.group);
+      setScreen('app');
+      maybeAskNotifPermission();
+    } catch (e) {
+      setAuthError(e.message);
+    }
+  }
+
+  function handleLogout() {
+    localStorage.removeItem('homeTasksSession');
+    setCurrentUser(null);
+    setGroup(null);
+    setTasks([]);
+    setNotifications([]);
+    setShowBell(false);
+    setUsername('');
+    setPassword('');
+    setScreen('login');
+    setAuthTab('login');
+  }
+
+  function requestNotifPermission() {
+    if (typeof Notification === 'undefined') return;
+    Notification.requestPermission().then(p => setNotifPermission(p));
+  }
+
+  function maybeAskNotifPermission() {
+    try {
+      if (typeof Notification === 'undefined') return;
+      if (Notification.permission !== 'default') return;
+      if (localStorage.getItem('notifPromptAsked')) return;
+      setShowNotifPrompt(true);
+    } catch (e) {}
+  }
+
+  function dismissNotifPrompt(accepted) {
+    localStorage.setItem('notifPromptAsked', '1');
+    setShowNotifPrompt(false);
+    if (accepted) requestNotifPermission();
+  }
+
+  async function markNotificationsRead() {
+    const mine = notifications.some(n => n.toUser === currentUser.username && !n.read);
+    if (!mine) return;
+    setNotifications(notifications.map(n => (n.toUser === currentUser.username) ? { ...n, read: true } : n));
+    try { await api('/api/notifications/' + group.id + '/read', 'POST', { username: currentUser.username }); } catch (e) {}
+  }
+
+  function openNewTaskForm() {
+    setEditingTask(null);
+    setTaskTitle('');
+    setTaskNote('');
+    setTaskAssignee((group.members && group.members[0]) || currentUser.username);
+    setShowTaskForm(true);
+  }
+
+  function openEditTaskForm(task) {
+    setEditingTask(task);
+    setTaskTitle(task.title);
+    setTaskNote(task.note || '');
+    setTaskAssignee(task.assignee);
+    setShowTaskForm(true);
+  }
+
+  async function submitTaskForm() {
+    if (!taskTitle.trim()) return;
+    try {
+      if (editingTask) {
+        await api('/api/tasks/' + group.id + '/' + editingTask.id, 'PUT', {
+          title: taskTitle.trim(), note: taskNote.trim(), assignee: taskAssignee, byUser: currentUser.username,
+        });
+      } else {
+        await api('/api/tasks/' + group.id, 'POST', {
+          title: taskTitle.trim(), note: taskNote.trim(), assignee: taskAssignee, byUser: currentUser.username,
+        });
+      }
+      await refreshState();
+    } catch (e) {}
+    setShowTaskForm(false);
+  }
+
+  async function deleteTask(id) {
+    try {
+      await api('/api/tasks/' + group.id + '/' + id, 'DELETE');
+      await refreshState();
+    } catch (e) {}
+  }
+
+  async function toggleDone(task) {
+    try {
+      await api('/api/tasks/' + group.id + '/' + task.id, 'PUT', { done: !task.done, byUser: currentUser.username });
+      await refreshState();
+    } catch (e) {}
+  }
+
+  async function handleChangePassword() {
+    setSettingsMsg('');
+    try {
+      await api('/api/user/change-password', 'POST', {
+        username: currentUser.username, oldPassword, newPassword,
+      });
+      setOldPassword(''); setNewPassword('');
+      setSettingsMsg('הסיסמה עודכנה בהצלחה.');
+    } catch (e) {
+      setSettingsMsg(e.message);
+    }
+  }
+
+  async function handlePromote() {
+    if (!promoteTarget) return;
+    try {
+      await api('/api/group/' + group.id + '/promote', 'POST', { username: promoteTarget, byUser: currentUser.username });
+      setPromoteTarget('');
+      await refreshState();
+      setSettingsMsg(promoteTarget + ' מונה/תה למנהל/ת.');
+    } catch (e) {
+      setSettingsMsg(e.message);
+    }
+  }
+
+  async function handleRemoveMember(member) {
+    if (!window.confirm('להסיר את ' + member + ' מהקבוצה?')) return;
+    try {
+      await api('/api/group/' + group.id + '/remove-member', 'POST', { username: member, byUser: currentUser.username });
+      await refreshState();
+    } catch (e) {
+      setSettingsMsg(e.message);
+    }
+  }
+
+  async function handleLeaveGroup() {
+    if (!window.confirm('לעזוב את הקבוצה? תצטרכו קוד הצטרפות כדי לחזור.')) return;
+    try {
+      await api('/api/group/' + group.id + '/leave', 'POST', { username: currentUser.username });
+      handleLogout();
+    } catch (e) {
+      setSettingsMsg(e.message);
+    }
+  }
+
+  async function handleDeleteGroup() {
+    if (!window.confirm('פעולה זו תמחק לצמיתות את הקבוצה, כל המטלות וכל המשתמשים בה. להמשיך?')) return;
+    if (!window.confirm('בטוחים לגמרי? אין דרך לבטל את זה.')) return;
+    try {
+      await api('/api/group/' + group.id, 'DELETE', { byUser: currentUser.username });
+      handleLogout();
+    } catch (e) {
+      setSettingsMsg(e.message);
+    }
+  }
+
+  if (booting) {
+    return <div style={{minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff', fontFamily: 'Rubik, sans-serif'}}>טוען...</div>;
+  }
+
+  if (screen !== 'app') {
+    return (
+      <div style={{minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20}}>
+        <div className="note" style={{width: 360, maxWidth: '100%', padding: '32px 28px'}}>
+          <h1 className="display" style={{fontSize: 24, margin: '0 0 4px', textAlign: 'center'}}>לוח המטלות של המשפחה</h1>
+          <p style={{textAlign: 'center', color: '#6b7280', fontSize: 14, margin: '0 0 20px'}}>מנהלים מטלות בית ביחד</p>
+
+          <div style={{display: 'flex', gap: 16, marginBottom: 18, borderBottom: '1.5px solid rgba(0,0,0,0.1)'}}>
+            <div className="tab" style={{color: authTab === 'login' ? '#7c3aed' : '#9ca3af', borderBottomColor: authTab === 'login' ? '#7c3aed' : 'transparent'}}
+              onClick={() => { setAuthTab('login'); setAuthError(''); }}>התחברות</div>
+            <div className="tab" style={{color: authTab === 'signup' ? '#7c3aed' : '#9ca3af', borderBottomColor: authTab === 'signup' ? '#7c3aed' : 'transparent'}}
+              onClick={() => { setAuthTab('signup'); setAuthError(''); }}>משתמש חדש</div>
+          </div>
+
+          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+            <input className="input" placeholder="שם משתמש" value={username} onChange={e => setUsername(e.target.value)} />
+            <input className="input" type="password" placeholder="סיסמה" value={password} onChange={e => setPassword(e.target.value)} />
+
+            {authTab === 'signup' && (
+              <React.Fragment>
+                <div style={{display: 'flex', gap: 8, marginTop: 4}}>
+                  <button type="button" className="btn" style={{flex: 1, fontSize: 13, padding: '8px 6px', background: signupMode === 'newGroup' ? '#7c3aed' : 'transparent', color: signupMode === 'newGroup' ? '#ffffff' : '#4c1d95', border: '1.5px solid rgba(0,0,0,0.15)'}}
+                    onClick={() => setSignupMode('newGroup')}>פתיחת קבוצה חדשה</button>
+                  <button type="button" className="btn" style={{flex: 1, fontSize: 13, padding: '8px 6px', background: signupMode === 'joinGroup' ? '#7c3aed' : 'transparent', color: signupMode === 'joinGroup' ? '#ffffff' : '#4c1d95', border: '1.5px solid rgba(0,0,0,0.15)'}}
+                    onClick={() => setSignupMode('joinGroup')}>הצטרפות לקבוצה קיימת</button>
+                </div>
+                {signupMode === 'newGroup' ? (
+                  <input className="input" placeholder="שם הקבוצה (לדוגמה: משפחת כהן)" value={groupNameInput} onChange={e => setGroupNameInput(e.target.value)} />
+                ) : (
+                  <input className="input" placeholder="קוד הקבוצה שקיבלתם" value={groupCodeInput} onChange={e => setGroupCodeInput(e.target.value.toUpperCase())} />
+                )}
+              </React.Fragment>
+            )}
+
+            {authError && <div style={{color: '#dc2626', fontSize: 13}}>{authError}</div>}
+
+            <button className="btn btn-primary" style={{marginTop: 6}} onClick={authTab === 'login' ? handleLogin : handleSignup}>
+              {authTab === 'login' ? 'התחברות' : 'יצירת חשבון'}
+            </button>
+            <p style={{fontSize: 12, color: '#9ca3af', textAlign: 'center', margin: '4px 0 0'}}>
+              בפעם הבאה שתפתחו את האפליקציה תיכנסו ישירות, בלי צורך להזין שוב שם וסיסמה.
+            </p>
+          </div>
+          <a href="./app.apk" download style={{display: 'block', textAlign: 'center', marginTop: 14, color: '#7c3aed', fontSize: 13, fontWeight: 600, textDecoration: 'none'}}>
+            📥 הורדת האפליקציה לאנדרואיד (APK)
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  const isAdmin = currentUser.role === 'admin';
+  const members = group.members || [];
+  const myUnread = notifications.filter(n => n.toUser === currentUser.username && !n.read).length;
+
+  return (
+    <div style={{minHeight: '100vh', padding: '24px 16px 60px'}}>
+      <div style={{maxWidth: 720, margin: '0 auto'}}>
+        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6, flexWrap: 'wrap', gap: 10}}>
+          <div>
+            <h1 className="display" style={{color: '#ffffff', fontSize: 26, margin: 0}}>{group.name}</h1>
+            {isAdmin && (
+              <p style={{color: 'rgba(255,255,255,0.8)', fontSize: 13, margin: '4px 0 0'}}>
+                קוד הצטרפות לקבוצה: <strong style={{letterSpacing: 1}}>{group.code}</strong>
+              </p>
+            )}
+          </div>
+          <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
+            <span style={{color: '#ffffff', fontSize: 14}}>שלום, {currentUser.username}</span>
+            <div className="bell-wrap">
+              <button className="bell-btn" aria-label="התראות" onClick={() => {
+                const next = !showBell;
+                setShowBell(next);
+                if (next) markNotificationsRead();
+              }}>
+                🔔
+                {myUnread > 0 && <span className="bell-badge">{myUnread}</span>}
+              </button>
+              {showBell && (
+                <div className="bell-dropdown">
+                  {notifPermission !== 'granted' && notifPermission !== 'unsupported' && (
+                    <div className="notif-item" style={{background: '#f6d186'}}>
+                      רוצים לקבל התראה בדפדפן ברגע שמקצים לכם מטלה?
+                      <div style={{marginTop: 6}}>
+                        <button className="btn btn-primary" style={{fontSize: 12, padding: '5px 10px'}} onClick={requestNotifPermission}>הפעלת התראות</button>
+                      </div>
+                    </div>
+                  )}
+                  {notifications.filter(n => n.toUser === currentUser.username).length === 0 && (
+                    <div className="notif-item" style={{color: '#6b7280'}}>אין עדיין התראות.</div>
+                  )}
+                  {notifications.filter(n => n.toUser === currentUser.username).slice().reverse().slice(0, 20).map(n => (
+                    <div key={n.id} className="notif-item" style={{background: n.read ? 'transparent' : '#f3eeff'}}>
+                      {n.type === 'assigned'
+                        ? (n.fromUser + ' הקצה/תה לך מטלה: ' + n.taskTitle)
+                        : (n.fromUser + ' סימן/ה שהמטלה "' + n.taskTitle + '" בוצעה')}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button className="bell-btn" aria-label="הגדרות" onClick={() => { setShowSettings(true); setSettingsMsg(''); }}>⚙️</button>
+            <button className="btn btn-ghost" style={{color: '#ffffff', borderColor: 'rgba(255,255,255,0.4)', padding: '6px 12px', fontSize: 13}} onClick={handleLogout}>יציאה</button>
+          </div>
+        </div>
+
+        <div style={{display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20}}>
+          {members.map(m => {
+            const c = colorFor(m);
+            return <span key={m} className="chip" style={{background: c.bg, color: c.text}}>{m}{(group.admins || []).includes(m) ? ' · מנהל/ת' : ''}</span>;
+          })}
+        </div>
+
+        {isAdmin && <button className="btn btn-primary" style={{marginBottom: 20}} onClick={openNewTaskForm}>+ הוספת מטלה</button>}
+
+        {tasks.length === 0 && <p style={{color: 'rgba(255,255,255,0.8)', textAlign: 'center', marginTop: 40}}>אין עדיין מטלות בקבוצה.</p>}
+
+        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 18}}>
+          {tasks.map((task, i) => {
+            const c = colorFor(task.assignee);
+            return (
+              <div key={task.id} className="note" style={{padding: '20px 18px 18px', opacity: task.done ? 0.6 : 1, overflow: 'hidden'}}>
+                <div style={{position: 'absolute', top: 0, right: 0, left: 0, height: 5, background: c.border}}></div>
+                <h3 style={{margin: '4px 0 6px', fontSize: 17, textDecoration: task.done ? 'line-through' : 'none'}}>{task.title}</h3>
+                {task.note && <p style={{fontSize: 13, color: '#6b7280', margin: '0 0 10px'}}>{task.note}</p>}
+                <span className="chip" style={{background: c.bg, color: c.text, marginBottom: 12}}>{task.assignee}</span>
+                <div style={{display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap'}}>
+                  <button className="btn" style={{fontSize: 12, padding: '6px 10px', background: task.done ? 'transparent' : '#7c3aed', color: task.done ? '#4c1d95' : '#ffffff', border: task.done ? '1.5px solid rgba(0,0,0,0.15)' : 'none'}}
+                    onClick={() => toggleDone(task)}>{task.done ? 'סמנו כלא בוצע' : 'סמנו כבוצע'}</button>
+                  {isAdmin && (
+                    <React.Fragment>
+                      <button className="btn btn-ghost" style={{fontSize: 12, padding: '6px 10px'}} onClick={() => openEditTaskForm(task)}>עריכה</button>
+                      <button className="btn btn-danger" style={{fontSize: 12, padding: '6px 10px'}} onClick={() => deleteTask(task.id)}>מחיקה</button>
+                    </React.Fragment>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {showTaskForm && (
+        <div style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 10}}>
+          <div className="note" style={{width: 360, maxWidth: '100%', padding: '24px 22px'}}>
+            <h2 style={{marginTop: 0, fontSize: 19}}>{editingTask ? 'עריכת מטלה' : 'מטלה חדשה'}</h2>
+            <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+              <input className="input" placeholder="כותרת המטלה" value={taskTitle} onChange={e => setTaskTitle(e.target.value)} />
+              <textarea className="input" placeholder="פרטים נוספים (לא חובה)" rows={3} value={taskNote} onChange={e => setTaskNote(e.target.value)} style={{resize: 'vertical'}} />
+              <div>
+                <label style={{fontSize: 13, color: '#6b7280', display: 'block', marginBottom: 6}}>שיוך למי מבני הקבוצה</label>
+                <select className="input" value={taskAssignee} onChange={e => setTaskAssignee(e.target.value)}>
+                  {members.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div style={{display: 'flex', gap: 10, marginTop: 6}}>
+                <button className="btn btn-primary" style={{flex: 1}} onClick={submitTaskForm}>{editingTask ? 'שמירה' : 'הוספה'}</button>
+                <button className="btn btn-ghost" style={{flex: 1}} onClick={() => setShowTaskForm(false)}>ביטול</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSettings && (
+        <div style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 10}}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowSettings(false); }}>
+          <div className="note" style={{width: 400, maxWidth: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '24px 22px'}}>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+              <h2 style={{margin: 0, fontSize: 19}}>הגדרות</h2>
+              <button className="btn btn-ghost" style={{padding: '4px 10px', fontSize: 13}} onClick={() => setShowSettings(false)}>סגירה</button>
+            </div>
+
+            {settingsMsg && <div style={{fontSize: 13, color: '#7c3aed', background: '#f3eeff', padding: '8px 10px', borderRadius: 8, marginTop: 12}}>{settingsMsg}</div>}
+
+            <h3 style={{fontSize: 15, margin: '18px 0 8px'}}>שינוי סיסמה</h3>
+            <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+              <input className="input" type="password" placeholder="סיסמה נוכחית" value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
+              <input className="input" type="password" placeholder="סיסמה חדשה" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+              <button className="btn btn-primary" onClick={handleChangePassword}>עדכון סיסמה</button>
+            </div>
+
+            {isAdmin && (
+              <React.Fragment>
+                <h3 style={{fontSize: 15, margin: '20px 0 8px'}}>ניהול חברי קבוצה</h3>
+                <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+                  {members.map(m => (
+                    <div key={m} style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8}}>
+                      <span className="chip" style={{background: colorFor(m).bg, color: colorFor(m).text}}>
+                        {m}{(group.admins || []).includes(m) ? ' · מנהל/ת' : ''}
+                      </span>
+                      {m !== currentUser.username && (
+                        <button className="btn btn-danger" style={{fontSize: 12, padding: '4px 8px'}} onClick={() => handleRemoveMember(m)}>הסרה</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <h3 style={{fontSize: 15, margin: '20px 0 8px'}}>מינוי מנהל/ת נוסף/ת</h3>
+                <div style={{display: 'flex', gap: 8}}>
+                  <select className="input" value={promoteTarget} onChange={e => setPromoteTarget(e.target.value)}>
+                    <option value="">בחרו חבר/ת קבוצה</option>
+                    {members.filter(m => !(group.admins || []).includes(m)).map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <button className="btn btn-primary" onClick={handlePromote}>מינוי</button>
+                </div>
+              </React.Fragment>
+            )}
+
+            <h3 style={{fontSize: 15, margin: '20px 0 8px', color: '#dc2626'}}>אזור מסוכן</h3>
+            <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+              <button className="btn btn-danger" style={{border: '1.5px solid rgba(168,50,50,0.3)'}} onClick={handleLeaveGroup}>עזיבת הקבוצה</button>
+              {isAdmin && (
+                <button className="btn" style={{background: '#dc2626', color: '#ffffff'}} onClick={handleDeleteGroup}>מחיקת הקבוצה לצמיתות</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNotifPrompt && (
+        <div style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 30}}>
+          <div className="note" style={{width: 360, maxWidth: '100%', padding: '26px 24px', textAlign: 'center'}}>
+            <div style={{fontSize: 36, marginBottom: 8}}>🔔</div>
+            <h2 style={{marginTop: 0, fontSize: 18}}>לקבל התראות?</h2>
+            <p style={{color: '#6b7280', fontSize: 14, margin: '0 0 20px'}}>
+              נוכל לשלוח לכם התראה בדפדפן ברגע שמישהו מקצה לכם מטלה חדשה.
+            </p>
+            <div style={{display: 'flex', gap: 10}}>
+              <button className="btn btn-primary" style={{flex: 1}} onClick={() => dismissNotifPrompt(true)}>כן, הפעילו התראות</button>
+              <button className="btn btn-ghost" style={{flex: 1}} onClick={() => dismissNotifPrompt(false)}>לא תודה</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
