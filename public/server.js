@@ -5,8 +5,11 @@ const fs = require('fs');
 const path = require('path');
 
 const DB_PATH = path.join(__dirname, 'db.json');
+const UPLOADS_DIR = path.join(__dirname, 'uploads'); // מחוץ ל-public בכוונה - לא מוגש ישירות, רק דרך ה-API המאומת
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 function readDB() {
@@ -155,11 +158,62 @@ app.get('/api/state/:groupId', (req, res) => {
   const db = readDB();
   const group = db.groups[req.params.groupId];
   if (!group) return res.status(404).json({ error: 'group not found' });
+
+  const viewer = authenticate(db, req.query.username, req.query.token);
+  const viewerIsAdmin = isAdmin(group, viewer);
+
+  const rawTasks = db.tasks[req.params.groupId] || [];
+  const tasks = rawTasks.map(t => {
+    if (viewerIsAdmin) return t;
+    const { photos, ...rest } = t;
+    return { ...rest, photoCount: (photos || []).length };
+  });
+
   res.json({
     group,
-    tasks: db.tasks[req.params.groupId] || [],
+    tasks,
     notifications: db.notifications[req.params.groupId] || [],
   });
+});
+
+app.post('/api/tasks/:groupId/:taskId/photo', (req, res) => {
+  const db = readDB();
+  const authed = requireAuth(req, res, db);
+  if (!authed) return;
+  const groupId = req.params.groupId;
+  const group = db.groups[groupId];
+  if (!group || !group.members.includes(authed)) return res.status(403).json({ error: 'אין הרשאה' });
+  const list = db.tasks[groupId] || [];
+  const task = list.find(t => t.id === req.params.taskId);
+  if (!task) return res.status(404).json({ error: 'task not found' });
+  task.photos = task.photos || [];
+  if (task.photos.length >= 3) return res.status(400).json({ error: 'כבר יש 3 תמונות במטלה זו' });
+
+  const { imageBase64 } = req.body || {};
+  if (!imageBase64) return res.status(400).json({ error: 'לא התקבלה תמונה' });
+  const raw = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+  const buffer = Buffer.from(raw, 'base64');
+  if (buffer.length > 3 * 1024 * 1024) return res.status(400).json({ error: 'התמונה גדולה מדי' });
+
+  const photoId = genId();
+  const taskDir = path.join(UPLOADS_DIR, groupId, task.id);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, photoId + '.jpg'), buffer);
+  task.photos.push(photoId);
+  writeDB(db);
+  res.json({ photos: task.photos });
+});
+
+app.get('/api/tasks/:groupId/:taskId/photo/:photoId', (req, res) => {
+  const db = readDB();
+  const authed = authenticate(db, req.query.username, req.query.token);
+  const groupId = req.params.groupId;
+  const group = db.groups[groupId];
+  if (!group) return res.status(404).json({ error: 'group not found' });
+  if (!isAdmin(group, authed)) return res.status(403).json({ error: 'רק מנהל יכול לצפות בתמונות' });
+  const filePath = path.join(UPLOADS_DIR, groupId, req.params.taskId, req.params.photoId + '.jpg');
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'photo not found' });
+  res.sendFile(filePath);
 });
 
 app.post('/api/user/change-password', async (req, res) => {
@@ -267,6 +321,7 @@ app.post('/api/tasks/:groupId', (req, res) => {
     note: (note || '').trim(),
     assignee,
     done: false,
+    photos: [],
     createdAt: Date.now(),
   };
   db.tasks[groupId] = db.tasks[groupId] || [];
@@ -319,6 +374,10 @@ app.delete('/api/tasks/:groupId/:taskId', (req, res) => {
   if (!group || !group.members.includes(authed)) return res.status(403).json({ error: 'אין הרשאה' });
   db.tasks[groupId] = (db.tasks[groupId] || []).filter(t => t.id !== req.params.taskId);
   writeDB(db);
+  try {
+    const taskDir = path.join(UPLOADS_DIR, groupId, req.params.taskId);
+    if (fs.existsSync(taskDir)) fs.rmSync(taskDir, { recursive: true, force: true });
+  } catch (e) {}
   res.json({ ok: true });
 });
 

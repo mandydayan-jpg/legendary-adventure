@@ -118,6 +118,7 @@ function App() {
 
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifPrompt, setShowNotifPrompt] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({});
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [settingsMsg, setSettingsMsg] = useState('');
@@ -134,7 +135,7 @@ function App() {
 
   async function refreshState() {
     try {
-      const data = await api('/api/state/' + group.id);
+      const data = await api('/api/state/' + group.id + '?username=' + encodeURIComponent(currentUser.username) + '&token=' + encodeURIComponent(authToken));
       setGroup(data.group);
       setTasks(data.tasks);
 
@@ -295,6 +296,70 @@ function App() {
       await api('/api/tasks/' + group.id + '/' + id, 'DELETE', { username: currentUser.username, token: authToken });
       await refreshState();
     } catch (e) {}
+  }
+
+  // מכווץ תמונה בדפדפן (בלי לפגוע משמעותית באיכות) לפני ההעלאה - מקטין גודל קובץ באופן ניכר
+  function compressImage(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = reject;
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = reject;
+        img.onload = () => {
+          const maxDim = 1280;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) { height = Math.round(height * (maxDim / width)); width = maxDim; }
+            else { width = Math.round(width * (maxDim / height)); height = maxDim; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.72));
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function uploadPhotoWithProgress(taskId, dataURL) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/tasks/' + group.id + '/' + taskId + '/photo');
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          setUploadProgress(prev => ({ ...prev, [taskId]: pct }));
+        }
+      };
+      xhr.onload = () => {
+        setUploadProgress(prev => { const n = { ...prev }; delete n[taskId]; return n; });
+        if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText));
+        else reject(new Error(JSON.parse(xhr.responseText || '{}').error || 'שגיאה בהעלאה'));
+      };
+      xhr.onerror = () => {
+        setUploadProgress(prev => { const n = { ...prev }; delete n[taskId]; return n; });
+        reject(new Error('שגיאת רשת בהעלאה'));
+      };
+      xhr.send(JSON.stringify({ username: currentUser.username, token: authToken, imageBase64: dataURL }));
+    });
+  }
+
+  async function handlePhotoSelected(task, file) {
+    if (!file) return;
+    if ((task.photos || []).length >= 3) return;
+    try {
+      setUploadProgress(prev => ({ ...prev, [task.id]: 1 }));
+      const dataURL = await compressImage(file);
+      await uploadPhotoWithProgress(task.id, dataURL);
+      await refreshState();
+    } catch (e) {
+      setUploadProgress(prev => { const n = { ...prev }; delete n[task.id]; return n; });
+    }
   }
 
   async function toggleDone(task) {
@@ -490,9 +555,39 @@ function App() {
                 <h3 style={{margin: '4px 0 6px', fontSize: 17, textDecoration: task.done ? 'line-through' : 'none'}}>{task.title}</h3>
                 {task.note && <p style={{fontSize: 13, color: '#6b7280', margin: '0 0 10px'}}>{task.note}</p>}
                 <span className="chip" style={{background: c.bg, color: c.text, marginBottom: 12}}>{task.assignee}</span>
+
+                {isAdmin && (task.photos || []).length > 0 && (
+                  <div style={{display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap'}}>
+                    {task.photos.map(photoId => (
+                      <img key={photoId}
+                        src={'/api/tasks/' + group.id + '/' + task.id + '/photo/' + photoId + '?username=' + encodeURIComponent(currentUser.username) + '&token=' + encodeURIComponent(authToken)}
+                        alt="הוכחת ביצוע" style={{width: 56, height: 56, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e0f5'}} />
+                    ))}
+                  </div>
+                )}
+                {!isAdmin && task.photoCount > 0 && (
+                  <p style={{fontSize: 12, color: '#9ca3af', margin: '8px 0 0'}}>📷 {task.photoCount} תמונות הועלו</p>
+                )}
+
+                {uploadProgress[task.id] !== undefined && (
+                  <div style={{marginTop: 10}}>
+                    <div style={{height: 6, background: '#f3eeff', borderRadius: 4, overflow: 'hidden'}}>
+                      <div style={{height: '100%', width: uploadProgress[task.id] + '%', background: '#7c3aed', transition: 'width 0.15s ease'}}></div>
+                    </div>
+                    <span style={{fontSize: 11, color: '#9ca3af'}}>מעלה תמונה... {uploadProgress[task.id]}%</span>
+                  </div>
+                )}
+
                 <div style={{display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap'}}>
                   <button className="btn" style={{fontSize: 12, padding: '6px 10px', background: task.done ? 'transparent' : '#7c3aed', color: task.done ? '#4c1d95' : '#ffffff', border: task.done ? '1.5px solid rgba(0,0,0,0.15)' : 'none'}}
                     onClick={() => toggleDone(task)}>{task.done ? 'סמנו כלא בוצע' : 'סמנו כבוצע'}</button>
+                  {((isAdmin ? (task.photos || []).length : (task.photoCount || 0)) < 3) && (
+                    <label className="btn btn-ghost" style={{fontSize: 12, padding: '6px 10px', cursor: 'pointer'}}>
+                      📷 הוספת תמונה
+                      <input type="file" accept="image/*" capture="environment" style={{display: 'none'}}
+                        onChange={(e) => { handlePhotoSelected(task, e.target.files[0]); e.target.value = ''; }} />
+                    </label>
+                  )}
                   {isAdmin && (
                     <React.Fragment>
                       <button className="btn btn-ghost" style={{fontSize: 12, padding: '6px 10px'}} onClick={() => openEditTaskForm(task)}>עריכה</button>
