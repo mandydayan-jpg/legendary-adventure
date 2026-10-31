@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f2742"/>
+      <stop offset="1" stop-color="#1d4e89"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" rx="18" fill="url(#bg)"/>
+  <text x="600" y="92" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="58" font-weight="bold" fill="#ffffff">⚖️ Jewish Legal Assistant</text>
+  <text x="600" y="145" text-anchor="middle" direction="rtl" font-family="Arial, Helvetica, sans-serif" font-size="30" fill="#cfe0f5">עוזר משפטי אישי בעברית, בתוך Claude</text>
+  <g font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#0f2742" text-anchor="middle">
+    <rect x="95"  y="195" width="230" height="56" rx="28" fill="#ffd166"/>
+    <text x="210" y="231" direction="rtl">🌐 בדיקת אתר</text>
+    <rect x="365" y="195" width="230" height="56" rx="28" fill="#ffd166"/>
+    <text x="480" y="231" direction="rtl">📄 תביעה קטנה</text>
+    <rect x="635" y="195" width="230" height="56" rx="28" fill="#ffd166"/>
+    <text x="750" y="231" direction="rtl">🛒 מכתבי דרישה</text>
+    <rect x="905" y="195" width="230" height="56" rx="28" fill="#ffd166"/>
+    <text x="1020" y="231" direction="rtl">🚗 ביטול דוחות</text>
+  </g>
+</svg>
