@@ -4,6 +4,7 @@ Sources (all real, all optional except yfinance):
   * Yahoo Finance via yfinance (no key)          - always on
   * Finnhub company-news   (FINNHUB_API_KEY)     - best 30-day coverage on the free tier
   * Polygon reference news (POLYGON_API_KEY)
+  * Alpha Vantage NEWS_SENTIMENT (ALPHAVANTAGE_API_KEY)
 
 Time weighting (rulebook):
   * RECENT_0_72H   : articles from the last 72 hours share 70% of the total weight.
@@ -20,6 +21,7 @@ import math
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -149,6 +151,34 @@ def _from_polygon(ticker: str, since: datetime, cfg: Settings) -> list[dict]:
     return out
 
 
+def _from_alphavantage(ticker: str, since: datetime, cfg: Settings) -> list[dict]:
+    r = requests.get(
+        "https://www.alphavantage.co/query",
+        params={"function": "NEWS_SENTIMENT", "tickers": ticker, "time_from": since.strftime("%Y%m%dT%H%M"),
+                "sort": "LATEST", "limit": 200, "apikey": cfg.alphavantage_api_key},
+        timeout=cfg.http_timeout,
+    )
+    r.raise_for_status()
+    js = r.json()
+    if "feed" not in js:  # errors / rate limits come back as HTTP 200 with a message key
+        raise RuntimeError(str(js.get("Information") or js.get("Note") or js.get("Error Message") or js)[:200])
+    out = []
+    for it in js["feed"]:
+        if not it.get("title") or not it.get("time_published"):
+            continue
+        out.append({
+            "provider": "alphavantage",
+            "publisher": it.get("source") or "",
+            "title": it["title"],
+            "summary": it.get("summary") or "",
+            "url": it.get("url") or "",
+            # "20261030T153000" - Alpha Vantage publishes times in US/Eastern
+            "ts": datetime.strptime(it["time_published"][:15], "%Y%m%dT%H%M%S")
+                  .replace(tzinfo=ZoneInfo("America/New_York")).astimezone(timezone.utc),
+        })
+    return out
+
+
 # --------------------------------------------------------------------------- weighting
 def bucket_for(age_hours: float, cfg: Settings = settings) -> str:
     if age_hours <= cfg.news_recent_hours:
@@ -195,6 +225,8 @@ def collect_news(ticker: str, cfg: Settings = settings, now: datetime | None = N
         providers.append(("finnhub", lambda: _from_finnhub(ticker, since, now, cfg)))
     if cfg.polygon_api_key:
         providers.append(("polygon", lambda: _from_polygon(ticker, since, cfg)))
+    if cfg.alphavantage_api_key:
+        providers.append(("alphavantage", lambda: _from_alphavantage(ticker, since, cfg)))
 
     for name, fn in providers:
         try:

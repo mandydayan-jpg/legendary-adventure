@@ -188,3 +188,68 @@ def test_analyzer_end_to_end_with_fake_claude():
     assert call["output_config"]["format"]["type"] == "json_schema"
     assert call["fallbacks"] == "default"
     assert "<news_data>" in call["messages"][0]["content"]
+
+
+# ------------------------------------------------------------------ market-data providers (mocked HTTP)
+from dataclasses import replace  # noqa: E402
+
+from backend import market_data, news_engine  # noqa: E402
+
+
+class FakeResp:
+    def __init__(self, js):
+        self._js = js
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._js
+
+
+def test_alphavantage_parsing(monkeypatch):
+    js = {"Time Series (Daily)": {
+        "2026-10-30": {"1. open": "10", "2. high": "11", "3. low": "9", "4. close": "10.5", "5. volume": "1000"},
+        "2026-10-29": {"1. open": "9", "2. high": "10", "3. low": "8", "4. close": "9.5", "5. volume": "900"}}}
+    monkeypatch.setattr(market_data.requests, "get", lambda *a, **k: FakeResp(js))
+    df = market_data._alphavantage("ACME", 100, replace(CFG, alphavantage_api_key="k"))
+    assert list(df.index.strftime("%Y-%m-%d")) == ["2026-10-29", "2026-10-30"]  # sorted ascending
+    assert df.attrs["source"] == "alphavantage" and df["Close"].iloc[-1] == 10.5
+
+
+def test_alphavantage_rate_limit_is_an_error(monkeypatch):
+    monkeypatch.setattr(market_data.requests, "get", lambda *a, **k: FakeResp({"Information": "rate limit"}))
+    with pytest.raises(market_data.DataUnavailableError, match="rate limit"):
+        market_data._alphavantage("ACME", 100, replace(CFG, alphavantage_api_key="k"))
+
+
+def test_twelvedata_parsing(monkeypatch):
+    js = {"status": "ok", "values": [
+        {"datetime": "2026-10-30", "open": "10", "high": "11", "low": "9", "close": "10.5", "volume": "1000"},
+        {"datetime": "2026-10-29", "open": "9", "high": "10", "low": "8", "close": "9.5", "volume": "900"}]}
+    monkeypatch.setattr(market_data.requests, "get", lambda *a, **k: FakeResp(js))
+    df = market_data._twelvedata("ACME", 100, replace(CFG, twelvedata_api_key="k"))
+    assert df.index[-1].strftime("%Y-%m-%d") == "2026-10-30" and df.attrs["source"] == "twelvedata"
+
+
+def test_provider_chain_falls_back_and_reports_all_failures(monkeypatch):
+    cfg = replace(CFG, twelvedata_api_key="k", alphavantage_api_key=None, price_providers=("twelvedata", "alphavantage", "yfinance"))
+    assert market_data.active_providers(cfg) == ["twelvedata", "yfinance"]  # alphavantage skipped: no key
+
+    def boom(*a, **k):
+        raise market_data.DataUnavailableError("down")
+    monkeypatch.setitem(market_data.PROVIDERS, "twelvedata", (boom, lambda c: True))
+    monkeypatch.setitem(market_data.PROVIDERS, "yfinance", (lambda t, b, c: market_data._finalize(squeeze_frame(), "yfinance"), lambda c: True))
+    assert market_data.fetch_daily_bars("ACME", 60, cfg).attrs["source"] == "yfinance"
+
+    monkeypatch.setitem(market_data.PROVIDERS, "yfinance", (boom, lambda c: True))
+    with pytest.raises(market_data.DataUnavailableError, match="twelvedata: down.*yfinance: down"):
+        market_data.fetch_daily_bars("ACME", 60, cfg)
+
+
+def test_alphavantage_news_parsing(monkeypatch):
+    js = {"feed": [{"title": "Acme wins contract", "summary": "s", "url": "u", "source": "Benzinga",
+                    "time_published": "20261030T153000"}]}
+    monkeypatch.setattr(news_engine.requests, "get", lambda *a, **k: FakeResp(js))
+    out = news_engine._from_alphavantage("ACME", NOW - timedelta(days=30), replace(CFG, alphavantage_api_key="k"))
+    assert out[0]["ts"] == datetime(2026, 10, 30, 19, 30, tzinfo=timezone.utc)  # 15:30 New York (EDT) -> 19:30 UTC

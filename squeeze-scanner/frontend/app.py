@@ -27,6 +27,7 @@ with st.sidebar:
         st.success(f"Backend OK · model `{h['model']}`")
         if not h["anthropic_key_configured"]:
             st.warning("ANTHROPIC_API_KEY is not set on the backend.")
+        st.caption("Price providers (fallback order): " + ", ".join(h.get("price_providers", [])))
         st.caption("News providers: " + ", ".join(h["news_providers"]))
     except Exception as exc:
         st.error(f"Backend unreachable: {exc}")
@@ -204,7 +205,7 @@ with tab_res:
 with tab_pre:
     snaps = pd.DataFrame(scan["technical_snapshots"])
     if not snaps.empty:
-        cols = ["ticker", "as_of", "last_bar_partial", "current_price", "high_30d", "compression_ratio",
+        cols = ["ticker", "data_source", "as_of", "last_bar_partial", "current_price", "high_30d", "compression_ratio",
                 "volume_ratio", "distance_from_high_pct", "price_compression", "volume_dry_up",
                 "near_resistance", "conditions_met"]
         st.dataframe(snaps[cols], width="stretch", hide_index=True)

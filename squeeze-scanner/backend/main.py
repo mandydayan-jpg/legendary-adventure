@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .ai_analyzer import ClaudeAnalyzer, analyze_ticker
 from .config import settings
 from .models import AnalysisResult, ScanRequest
+from .market_data import active_providers
 from .news_engine import collect_news
 from .scanner import DataUnavailableError, history_for_chart, scan_ticker, scan_universe
 
@@ -62,7 +63,9 @@ def health():
         "anthropic_key_configured": bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")),
         "news_providers": ["yfinance"]
         + (["finnhub"] if settings.finnhub_api_key else [])
-        + (["polygon"] if settings.polygon_api_key else []),
+        + (["polygon"] if settings.polygon_api_key else [])
+        + (["alphavantage"] if settings.alphavantage_api_key else []),
+        "price_providers": active_providers(settings),
         "universe_size": len(settings.universe),
     }
 

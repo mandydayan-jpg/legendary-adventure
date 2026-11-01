@@ -14,13 +14,10 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from .config import Settings, settings
+from .market_data import DataUnavailableError, fetch_daily_bars
 
 log = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
-
-
-class DataUnavailableError(RuntimeError):
-    """Raised when real market data cannot be fetched or is unusable. Never substituted with fake data."""
 
 
 @dataclass
@@ -50,6 +47,7 @@ class TechnicalSnapshot:
     reference_entry_trigger: float
     reference_stop_loss: float
     bars: int
+    data_source: str = "unknown"  # which provider supplied the bars
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -62,20 +60,9 @@ def _is_partial_bar(last_index: pd.Timestamp, now: datetime | None = None) -> bo
     return bar_date == now.date() and now.weekday() < 5 and time(9, 30) <= now.time() < time(16, 0)
 
 
-def fetch_history(ticker: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
-    """Download real OHLCV bars from Yahoo Finance. Raises DataUnavailableError on any problem."""
-    import yfinance as yf  # imported lazily so unit tests don't need network
-
-    try:
-        df = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=False)
-    except Exception as exc:  # network / parsing errors from yfinance
-        raise DataUnavailableError(f"{ticker}: price download failed: {exc}") from exc
-    if df is None or df.empty:
-        raise DataUnavailableError(f"{ticker}: no price data returned")
-    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
-    if df.empty:
-        raise DataUnavailableError(f"{ticker}: price data contained only NaNs")
-    return df
+def fetch_history(ticker: str, bars: int = 130, cfg: Settings = settings) -> pd.DataFrame:
+    """Real daily OHLCV bars via the provider chain in market_data.py (raises DataUnavailableError)."""
+    return fetch_daily_bars(ticker, bars, cfg)
 
 
 # --------------------------------------------------------------------------- rule engine
@@ -151,6 +138,7 @@ def evaluate_technicals(
         reference_entry_trigger=entry,
         reference_stop_loss=stop,
         bars=len(df),
+        data_source=df.attrs.get("source", "unknown"),
     )
 
 
@@ -194,7 +182,7 @@ def scan_universe(
 
 
 def history_for_chart(ticker: str, days: int = 90) -> list[dict]:
-    df = fetch_history(ticker, period="1y").iloc[-days:]
+    df = fetch_history(ticker, bars=max(days, 60)).iloc[-days:]
     return [
         {
             "date": str(pd.Timestamp(idx).date()),

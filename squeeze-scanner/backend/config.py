@@ -37,9 +37,19 @@ class Settings:
     # Server-side refusal fallback ("default" routing). Set to "0" to disable.
     anthropic_fallbacks: bool = os.getenv("ANTHROPIC_FALLBACKS", "1") == "1"
 
-    # --- Optional news providers (yfinance news is always used) ---
+    # --- Optional data providers (yfinance needs no key and is always available) ---
     finnhub_api_key: str | None = os.getenv("FINNHUB_API_KEY") or None
     polygon_api_key: str | None = os.getenv("POLYGON_API_KEY") or None
+    alphavantage_api_key: str | None = os.getenv("ALPHAVANTAGE_API_KEY") or None
+    twelvedata_api_key: str | None = os.getenv("TWELVEDATA_API_KEY") or None
+    # Price-provider fallback order; providers without a key are skipped.
+    price_providers: tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            p.strip().lower()
+            for p in os.getenv("PRICE_PROVIDERS", "twelvedata,alphavantage,yfinance").split(",")
+            if p.strip()
+        )
+    )
 
     # --- Strategy rulebook (Knowledge Base) ---
     compression_ratio_max: float = _float("RULE_COMPRESSION_RATIO_MAX", 0.35)  # 5d range < 35% of 30d range
